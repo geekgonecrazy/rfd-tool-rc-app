@@ -1,0 +1,16 @@
+{
+  "name": "rfd-discussions",
+  "version": "1.0.0",
+  "description": "Rocket.Chat app for RFD/ADR discussion management",
+  "main": "RfdDiscussionsApp.ts",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "rc-apps deploy",
+    "package": "rc-apps package"
+  },
+  "devDependencies": {
+    "@rocket.chat/apps-engine": "^1.41.0",
+    "typescript": "~5.3.3"
+  },
+  "dependencies": {}
+}
