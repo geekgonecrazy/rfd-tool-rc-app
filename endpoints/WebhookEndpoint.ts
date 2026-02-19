@@ -42,6 +42,9 @@ export class WebhookEndpoint extends ApiEndpoint {
             const siteUrlOverride = await read.getEnvironmentReader().getSettings().getValueById(SettingId.SiteUrl);
             const prefix = await read.getEnvironmentReader().getSettings().getValueById(SettingId.Prefix) || 'RFD';
             const overwriteInvalidUrl = await read.getEnvironmentReader().getSettings().getValueById(SettingId.OverwriteInvalidDiscussionUrl) || false;
+            const useDeepLinks = await read.getEnvironmentReader().getSettings().getValueById(SettingId.UseDeepLinks);
+            // Default to true if not set (for backwards compatibility)
+            const useDeepLinksValue = useDeepLinks === undefined || useDeepLinks === null ? true : useDeepLinks;
 
             if (!webhookSecret) {
                 logger.error('Webhook secret not configured');
@@ -90,10 +93,10 @@ export class WebhookEndpoint extends ApiEndpoint {
             // Handle event
             switch (payload.event) {
                 case 'rfd.created':
-                    return await this.handleCreated(payload, parentChannel, siteUrl, prefix, overwriteInvalidUrl, discussionManager, read.getPersistenceReader(), persis, logger);
+                    return await this.handleCreated(payload, parentChannel, siteUrl, prefix, overwriteInvalidUrl, useDeepLinksValue, discussionManager, read.getPersistenceReader(), persis, logger);
 
                 case 'rfd.updated':
-                    return await this.handleUpdated(payload, read.getPersistenceReader(), persis, discussionManager, parentChannel, siteUrl, prefix, overwriteInvalidUrl, logger);
+                    return await this.handleUpdated(payload, read.getPersistenceReader(), persis, discussionManager, parentChannel, siteUrl, prefix, overwriteInvalidUrl, useDeepLinksValue, logger);
 
                 default:
                     logger.warn(`Unknown event type: ${payload.event}`);
@@ -114,6 +117,7 @@ export class WebhookEndpoint extends ApiEndpoint {
         siteUrl: string,
         prefix: string,
         overwriteInvalidUrl: boolean,
+        useDeepLinks: boolean,
         manager: DiscussionManager,
         persistenceRead: any,
         persistence: IPersistence,
@@ -174,6 +178,7 @@ export class WebhookEndpoint extends ApiEndpoint {
             payload.link,
             siteUrl,
             prefix,
+            useDeepLinks,
         );
 
         if (!discussion) {
@@ -204,6 +209,7 @@ export class WebhookEndpoint extends ApiEndpoint {
         siteUrl: string,
         prefix: string,
         overwriteInvalidUrl: boolean,
+        useDeepLinks: boolean,
         logger: any,
     ): Promise<IApiResponse> {
         const rfdId = payload.rfd.id;
@@ -257,6 +263,7 @@ export class WebhookEndpoint extends ApiEndpoint {
                 payload.link,
                 siteUrl,
                 prefix,
+                useDeepLinks,
             );
 
             if (!discussion) {
