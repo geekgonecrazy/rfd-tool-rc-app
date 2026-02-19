@@ -87,9 +87,10 @@ export class DiscussionManager {
         );
 
         // Build discussion URL - use deep link or direct URL based on setting
+        const path = `group/${discussionId}`;
         const discussionUrl = useDeepLinks 
-            ? this.buildDeepLink(siteUrl, `group/${discussionId}`)
-            : this.buildDirectUrl(siteUrl, `group/${discussionId}`);
+            ? this.buildDeepLink(siteUrl, path)
+            : this.buildDirectUrl(siteUrl, path);
 
         return {
             id: discussionId,

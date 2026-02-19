@@ -44,7 +44,7 @@ export class WebhookEndpoint extends ApiEndpoint {
             const overwriteInvalidUrl = await read.getEnvironmentReader().getSettings().getValueById(SettingId.OverwriteInvalidDiscussionUrl) || false;
             const useDeepLinks = await read.getEnvironmentReader().getSettings().getValueById(SettingId.UseDeepLinks);
             // Default to true if not set (for backwards compatibility)
-            const useDeepLinksValue = useDeepLinks === undefined || useDeepLinks === null ? true : useDeepLinks;
+            const useDeepLinksValue = useDeepLinks ?? true;
 
             if (!webhookSecret) {
                 logger.error('Webhook secret not configured');
