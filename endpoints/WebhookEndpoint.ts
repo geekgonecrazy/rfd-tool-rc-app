@@ -84,7 +84,7 @@ export class WebhookEndpoint extends ApiEndpoint {
             }
 
             // Create discussion manager
-            const discussionManager = new DiscussionManager(read, modify, persis);
+            const discussionManager = new DiscussionManager(read, modify, persis, logger);
 
             // Handle event
             switch (payload.event) {

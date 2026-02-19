@@ -2,6 +2,7 @@ import {
     IModify,
     IRead,
     IPersistence,
+    ILogger,
 } from '@rocket.chat/apps-engine/definition/accessors';
 import { IRoom, RoomType } from '@rocket.chat/apps-engine/definition/rooms';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
@@ -12,7 +13,14 @@ export class DiscussionManager {
         private readonly read: IRead,
         private readonly modify: IModify,
         private readonly persistence: IPersistence,
+        private readonly logger?: ILogger,
     ) {}
+
+    private log(message: string): void {
+        if (this.logger) {
+            this.logger.info(message);
+        }
+    }
 
     /**
      * Create a new discussion for an RFD
@@ -200,13 +208,17 @@ export class DiscussionManager {
         parentRoom: IRoom,
         authorEmails: string[],
     ): Promise<void> {
+        this.log(`Adding authors to discussion: ${JSON.stringify(authorEmails)}`);
+        
         const appUser = await this.read.getUserReader().getAppUser();
         if (!appUser) {
+            this.log('No app user found');
             return;
         }
 
         // Get members of the parent room to match against
         const members = await this.read.getRoomReader().getMembers(parentRoom.id);
+        this.log(`Parent room ${parentRoom.slugifiedName} has ${members.length} members`);
         
         for (const authorInput of authorEmails) {
             // Skip empty inputs
@@ -222,10 +234,16 @@ export class DiscussionManager {
             const emailMatch = trimmedInput.match(/<([^>]+)>/);
             const email = emailMatch ? emailMatch[1].toLowerCase() : trimmedInput.toLowerCase();
             
+            this.log(`Looking for author: "${trimmedInput}", parsed email: "${email}"`);
+            
             // First try to match by email in parent room members
             user = members.find(m => 
                 m.emails?.some(e => e.address.toLowerCase() === email)
             );
+            
+            if (user) {
+                this.log(`Found user by email: ${user.username}`);
+            }
             
             // If not found by email, try by username
             if (!user) {
@@ -234,25 +252,35 @@ export class DiscussionManager {
                     m.username.toLowerCase() === email ||
                     m.username.toLowerCase() === trimmedInput.toLowerCase()
                 );
+                if (user) {
+                    this.log(`Found user by username in members: ${user.username}`);
+                }
             }
             
             // If still not found, try to get user directly by username
             if (!user && !email.includes('@')) {
                 try {
                     user = await this.read.getUserReader().getByUsername(trimmedInput);
+                    if (user) {
+                        this.log(`Found user by direct username lookup: ${user.username}`);
+                    }
                 } catch (e) {
-                    // User not found
+                    this.log(`User not found by username: ${trimmedInput}`);
                 }
             }
             
             if (user) {
                 try {
+                    this.log(`Adding user ${user.username} to discussion ${discussion.id}`);
                     const updater = await this.modify.getUpdater().room(discussion.id, appUser);
                     updater.addMemberToBeAddedByUsername(user.username);
                     await this.modify.getUpdater().finish(updater);
+                    this.log(`Successfully added ${user.username}`);
                 } catch (e) {
-                    // User might already be a member, ignore errors
+                    this.log(`Error adding user ${user.username}: ${e}`);
                 }
+            } else {
+                this.log(`No user found for author: ${trimmedInput}`);
             }
         }
     }
