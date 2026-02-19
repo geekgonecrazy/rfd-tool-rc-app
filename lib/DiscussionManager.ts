@@ -293,8 +293,9 @@ export class DiscussionManager {
             const updater = await this.modify.getUpdater().room(room.id, user);
             updater.setData({ description } as Partial<IRoom>);
             await this.modify.getUpdater().finish(updater);
+            this.log(`Set room description for ${room.id}`);
         } catch (e) {
-            // Log but don't fail - some room types may not support description
+            this.log(`Failed to set room description: ${e}`);
         }
     }
 
