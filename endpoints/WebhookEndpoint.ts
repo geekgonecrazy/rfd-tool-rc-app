@@ -92,7 +92,7 @@ export class WebhookEndpoint extends ApiEndpoint {
                     return await this.handleCreated(payload, parentChannel, siteUrl, prefix, discussionManager, read.getPersistenceReader(), persis, logger);
 
                 case 'rfd.updated':
-                    return await this.handleUpdated(payload, read.getPersistenceReader(), discussionManager, logger);
+                    return await this.handleUpdated(payload, read.getPersistenceReader(), persis, discussionManager, parentChannel, siteUrl, prefix, logger);
 
                 default:
                     logger.warn(`Unknown event type: ${payload.event}`);
@@ -184,7 +184,11 @@ export class WebhookEndpoint extends ApiEndpoint {
     private async handleUpdated(
         payload: WebhookPayload,
         persistenceRead: any,
+        persistence: IPersistence,
         manager: DiscussionManager,
+        parentChannel: string,
+        siteUrl: string,
+        prefix: string,
         logger: any,
     ): Promise<IApiResponse> {
         const rfdId = payload.rfd.id;
@@ -200,9 +204,33 @@ export class WebhookEndpoint extends ApiEndpoint {
             }
         }
 
+        // If no discussion exists, create one
         if (!discussionUrl) {
-            logger.info(`RFD ${rfdId} has no discussion URL, skipping update`);
-            return this.jsonResponse({ success: true, message: 'No discussion to update' });
+            logger.info(`RFD ${rfdId} has no discussion, creating one`);
+            
+            const discussion = await manager.createDiscussion(
+                parentChannel,
+                payload.rfd,
+                payload.link,
+                siteUrl,
+                prefix,
+            );
+
+            if (!discussion) {
+                return this.errorResponse(HttpStatusCode.INTERNAL_SERVER_ERROR, 'Failed to create discussion');
+            }
+
+            // Store in persistence
+            await DiscussionStore.storeDiscussion(persistence, rfdId, discussion.id, discussion.url);
+            logger.info(`Discussion created for updated RFD: ${discussion.url}`);
+
+            return this.jsonResponse({
+                success: true,
+                discussion: {
+                    id: discussion.id,
+                    url: discussion.url,
+                },
+            });
         }
 
         // Update the payload's discussion URL for the manager
