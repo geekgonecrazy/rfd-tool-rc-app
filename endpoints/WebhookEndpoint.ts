@@ -195,11 +195,15 @@ export class WebhookEndpoint extends ApiEndpoint {
 
         // Check if we have a discussion URL to update - first from payload, then from persistence
         let discussionUrl = payload.rfd.discussion;
+        let discussionFromPersistence = false;
+        let discussionId: string | undefined;
         
         if (!discussionUrl) {
             const existingDiscussion = await DiscussionStore.getDiscussion(persistenceRead, rfdId);
             if (existingDiscussion) {
                 discussionUrl = existingDiscussion.roomUrl;
+                discussionId = existingDiscussion.roomId;
+                discussionFromPersistence = true;
                 logger.info(`Found discussion URL from persistence for RFD ${rfdId}: ${discussionUrl}`);
             }
         }
@@ -249,6 +253,17 @@ export class WebhookEndpoint extends ApiEndpoint {
             payload.link,
             payload.changes,
         );
+
+        // If discussion was found from persistence (not in payload), return it so rfd-tool can commit it
+        if (discussionFromPersistence && discussionUrl) {
+            return this.jsonResponse({
+                success: true,
+                discussion: {
+                    id: discussionId || this.extractRoomIdFromUrl(discussionUrl) || '',
+                    url: discussionUrl,
+                },
+            });
+        }
 
         return this.jsonResponse({ success: true });
     }
