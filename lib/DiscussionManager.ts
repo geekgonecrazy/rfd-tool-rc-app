@@ -193,25 +193,61 @@ export class DiscussionManager {
     }
 
     /**
-     * Add authors to a discussion by matching emails to users in the parent channel
+     * Add authors to a discussion by matching emails/usernames to users in parent channel
      */
     private async addAuthorsToDiscussion(
         discussion: IRoom,
         parentRoom: IRoom,
         authorEmails: string[],
     ): Promise<void> {
-        // Get members of the parent room
+        const appUser = await this.read.getUserReader().getAppUser();
+        if (!appUser) {
+            return;
+        }
+
+        // Get members of the parent room to match against
         const members = await this.read.getRoomReader().getMembers(parentRoom.id);
         
-        for (const email of authorEmails) {
-            // Try to find user by email
-            const user = members.find(m => 
-                m.emails?.some(e => e.address.toLowerCase() === email.toLowerCase())
+        for (const authorInput of authorEmails) {
+            // Skip empty inputs
+            if (!authorInput || !authorInput.trim()) continue;
+            
+            let user: IUser | undefined;
+            
+            // Parse the author input - could be:
+            // - "email@example.com"
+            // - "Name <email@example.com>"
+            // - "username"
+            const trimmedInput = authorInput.trim();
+            const emailMatch = trimmedInput.match(/<([^>]+)>/);
+            const email = emailMatch ? emailMatch[1].toLowerCase() : trimmedInput.toLowerCase();
+            
+            // First try to match by email in parent room members
+            user = members.find(m => 
+                m.emails?.some(e => e.address.toLowerCase() === email)
             );
+            
+            // If not found by email, try by username
+            if (!user) {
+                // Try treating the input as a username
+                user = members.find(m => 
+                    m.username.toLowerCase() === email ||
+                    m.username.toLowerCase() === trimmedInput.toLowerCase()
+                );
+            }
+            
+            // If still not found, try to get user directly by username
+            if (!user && !email.includes('@')) {
+                try {
+                    user = await this.read.getUserReader().getByUsername(trimmedInput);
+                } catch (e) {
+                    // User not found
+                }
+            }
             
             if (user) {
                 try {
-                    const updater = await this.modify.getUpdater().room(discussion.id, user);
+                    const updater = await this.modify.getUpdater().room(discussion.id, appUser);
                     updater.addMemberToBeAddedByUsername(user.username);
                     await this.modify.getUpdater().finish(updater);
                 } catch (e) {
