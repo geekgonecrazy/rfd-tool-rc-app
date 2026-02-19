@@ -31,6 +31,7 @@ export class DiscussionManager {
         rfdLink: string,
         siteUrl: string,
         prefix: string = 'RFD',
+        useDeepLinks: boolean = true,
     ): Promise<{ id: string; url: string } | null> {
         // Get the parent room
         const parentRoom = await this.read.getRoomReader().getByName(parentChannel);
@@ -85,9 +86,11 @@ export class DiscussionManager {
             `_Authors: ${rfd.authors.join(', ')}_`
         );
 
-        // Build discussion URL as a universal/deep link for mobile and desktop app support
-        // Format: https://go.rocket.chat/room?host={host}&path=group/{roomId}
-        const discussionUrl = this.buildDeepLink(siteUrl, `group/${discussionId}`);
+        // Build discussion URL - use deep link or direct URL based on setting
+        const path = `group/${discussionId}`;
+        const discussionUrl = useDeepLinks 
+            ? this.buildDeepLink(siteUrl, path)
+            : this.buildDirectUrl(siteUrl, path);
 
         return {
             id: discussionId,
@@ -328,10 +331,63 @@ export class DiscussionManager {
      * Handles URLs like:
      *   - https://chat.example.com/group/ROOM_ID
      *   - https://chat.example.com/group/ROOM_ID?msg=xyz
+     *   - https://go.rocket.chat/room?host=example.com&path=group/ROOM_ID
      */
-    private extractRoomIdFromUrl(url: string): string | null {
-        const match = url.match(/\/group\/([^\/\?]+)/);
-        return match ? match[1] : null;
+    extractRoomIdFromUrl(url: string): string | null {
+        // Try direct group URL format first: /group/ROOM_ID
+        const directMatch = url.match(/\/group\/([^\/\?]+)/);
+        if (directMatch) {
+            return directMatch[1];
+        }
+
+        // Try go.rocket.chat deep link format: ?path=group/ROOM_ID or &path=group/ROOM_ID
+        const goRocketChatMatch = url.match(/[?&]path=group(?:%2F|\/)([^&]+)/i);
+        if (goRocketChatMatch) {
+            return decodeURIComponent(goRocketChatMatch[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if a URL is a valid Rocket.Chat discussion URL for our server
+     * Valid URLs are:
+     *   - URLs on our site (matching siteUrl host)
+     *   - go.rocket.chat deep links pointing to our host
+     * Invalid URLs are:
+     *   - External URLs (GitHub, etc.)
+     *   - go.rocket.chat links pointing to a different host
+     */
+    isValidDiscussionUrl(url: string, siteUrl: string): boolean {
+        if (!url) {
+            return false;
+        }
+
+        try {
+            const parsedUrl = new URL(url);
+            const parsedSiteUrl = new URL(siteUrl);
+
+            // Check if it's a go.rocket.chat deep link
+            if (parsedUrl.host.toLowerCase() === 'go.rocket.chat') {
+                // Extract host parameter from go.rocket.chat URL
+                const hostParam = parsedUrl.searchParams.get('host');
+                if (!hostParam) {
+                    return false;
+                }
+                // Check if the host in the deep link matches our site URL host
+                return hostParam.toLowerCase() === parsedSiteUrl.host.toLowerCase();
+            }
+
+            // Check if the URL is from our site (matching host)
+            if (parsedUrl.host.toLowerCase() === parsedSiteUrl.host.toLowerCase()) {
+                return true;
+            }
+
+            return false;
+        } catch {
+            // If URL parsing fails, the URL is invalid
+            return false;
+        }
     }
 
     /**
@@ -356,5 +412,20 @@ export class DiscussionManager {
         }
         
         return `https://go.rocket.chat/room?host=${encodeURIComponent(host)}&path=${encodeURIComponent(path)}`;
+    }
+
+    /**
+     * Build a direct URL for Rocket.Chat
+     * Constructs a direct site URL using the provided site URL and path.
+     * 
+     * Example: siteUrl="https://open.rocket.chat", path="group/abc123"
+     * Returns: "https://open.rocket.chat/group/abc123"
+     */
+    private buildDirectUrl(siteUrl: string, path: string): string {
+        // Ensure siteUrl doesn't have trailing slash and path doesn't have leading slash
+        const baseUrl = siteUrl.replace(/\/+$/, '');
+        const cleanPath = path.replace(/^\/+/, '');
+        
+        return `${baseUrl}/${cleanPath}`;
     }
 }

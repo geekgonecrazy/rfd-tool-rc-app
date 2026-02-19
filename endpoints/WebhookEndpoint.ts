@@ -41,6 +41,10 @@ export class WebhookEndpoint extends ApiEndpoint {
             const parentChannel = await read.getEnvironmentReader().getSettings().getValueById(SettingId.ParentChannel);
             const siteUrlOverride = await read.getEnvironmentReader().getSettings().getValueById(SettingId.SiteUrl);
             const prefix = await read.getEnvironmentReader().getSettings().getValueById(SettingId.Prefix) || 'RFD';
+            const overwriteInvalidUrl = await read.getEnvironmentReader().getSettings().getValueById(SettingId.OverwriteInvalidDiscussionUrl) || false;
+            const useDeepLinks = await read.getEnvironmentReader().getSettings().getValueById(SettingId.UseDeepLinks);
+            // Default to true if not set (for backwards compatibility)
+            const useDeepLinksValue = useDeepLinks ?? true;
 
             if (!webhookSecret) {
                 logger.error('Webhook secret not configured');
@@ -89,10 +93,10 @@ export class WebhookEndpoint extends ApiEndpoint {
             // Handle event
             switch (payload.event) {
                 case 'rfd.created':
-                    return await this.handleCreated(payload, parentChannel, siteUrl, prefix, discussionManager, read.getPersistenceReader(), persis, logger);
+                    return await this.handleCreated(payload, parentChannel, siteUrl, prefix, overwriteInvalidUrl, useDeepLinksValue, discussionManager, read.getPersistenceReader(), persis, logger);
 
                 case 'rfd.updated':
-                    return await this.handleUpdated(payload, read.getPersistenceReader(), persis, discussionManager, parentChannel, siteUrl, prefix, logger);
+                    return await this.handleUpdated(payload, read.getPersistenceReader(), persis, discussionManager, parentChannel, siteUrl, prefix, overwriteInvalidUrl, useDeepLinksValue, logger);
 
                 default:
                     logger.warn(`Unknown event type: ${payload.event}`);
@@ -112,6 +116,8 @@ export class WebhookEndpoint extends ApiEndpoint {
         parentChannel: string,
         siteUrl: string,
         prefix: string,
+        overwriteInvalidUrl: boolean,
+        useDeepLinks: boolean,
         manager: DiscussionManager,
         persistenceRead: any,
         persistence: IPersistence,
@@ -121,15 +127,32 @@ export class WebhookEndpoint extends ApiEndpoint {
 
         // First check if the incoming RFD already has a discussion link
         if (payload.rfd.discussion) {
-            logger.info(`RFD ${rfdId} already has discussion link: ${payload.rfd.discussion}`);
-            return this.jsonResponse({
-                success: true,
-                message: 'Discussion already exists',
-                discussion: {
-                    id: this.extractRoomIdFromUrl(payload.rfd.discussion) || '',
-                    url: payload.rfd.discussion,
-                },
-            });
+            // Validate the discussion URL
+            const validationResult = this.validateDiscussionUrl(
+                payload.rfd.discussion,
+                siteUrl,
+                rfdId,
+                overwriteInvalidUrl,
+                manager,
+                logger
+            );
+            
+            if (validationResult.response) {
+                return validationResult.response;
+            }
+            
+            // If createNew is false and no response, the URL was valid - return success
+            if (!validationResult.createNew) {
+                return this.jsonResponse({
+                    success: true,
+                    message: 'Discussion already exists',
+                    discussion: {
+                        id: validationResult.roomId!,
+                        url: payload.rfd.discussion,
+                    },
+                });
+            }
+            // If createNew is true, continue to create a new discussion
         }
 
         // Check persistence for existing discussion
@@ -155,6 +178,7 @@ export class WebhookEndpoint extends ApiEndpoint {
             payload.link,
             siteUrl,
             prefix,
+            useDeepLinks,
         );
 
         if (!discussion) {
@@ -176,11 +200,6 @@ export class WebhookEndpoint extends ApiEndpoint {
         return this.jsonResponse(response);
     }
 
-    private extractRoomIdFromUrl(url: string): string | null {
-        const match = url.match(/\/group\/([^\/\?]+)/);
-        return match ? match[1] : null;
-    }
-
     private async handleUpdated(
         payload: WebhookPayload,
         persistenceRead: any,
@@ -189,6 +208,8 @@ export class WebhookEndpoint extends ApiEndpoint {
         parentChannel: string,
         siteUrl: string,
         prefix: string,
+        overwriteInvalidUrl: boolean,
+        useDeepLinks: boolean,
         logger: any,
     ): Promise<IApiResponse> {
         const rfdId = payload.rfd.id;
@@ -197,8 +218,32 @@ export class WebhookEndpoint extends ApiEndpoint {
         let discussionUrl = payload.rfd.discussion;
         let discussionFromPersistence = false;
         let discussionId: string | undefined;
+        let shouldCreateNew = false;
         
-        if (!discussionUrl) {
+        if (discussionUrl) {
+            // Validate the existing URL using shared validation method
+            const validationResult = this.validateDiscussionUrl(
+                discussionUrl,
+                siteUrl,
+                rfdId,
+                overwriteInvalidUrl,
+                manager,
+                logger
+            );
+
+            if (validationResult.response) {
+                return validationResult.response;
+            }
+
+            if (validationResult.createNew) {
+                discussionUrl = undefined;
+                shouldCreateNew = true;
+            } else {
+                discussionId = validationResult.roomId;
+            }
+        }
+        
+        if (!discussionUrl && !shouldCreateNew) {
             const existingDiscussion = await DiscussionStore.getDiscussion(persistenceRead, rfdId);
             if (existingDiscussion) {
                 discussionUrl = existingDiscussion.roomUrl;
@@ -208,9 +253,9 @@ export class WebhookEndpoint extends ApiEndpoint {
             }
         }
 
-        // If no discussion exists, create one
+        // If no valid discussion exists, create one
         if (!discussionUrl) {
-            logger.info(`RFD ${rfdId} has no discussion, creating one`);
+            logger.info(`RFD ${rfdId} has no valid discussion, creating one`);
             
             const discussion = await manager.createDiscussion(
                 parentChannel,
@@ -218,6 +263,7 @@ export class WebhookEndpoint extends ApiEndpoint {
                 payload.link,
                 siteUrl,
                 prefix,
+                useDeepLinks,
             );
 
             if (!discussion) {
@@ -259,13 +305,54 @@ export class WebhookEndpoint extends ApiEndpoint {
             return this.jsonResponse({
                 success: true,
                 discussion: {
-                    id: discussionId || this.extractRoomIdFromUrl(discussionUrl) || '',
+                    id: discussionId || manager.extractRoomIdFromUrl(discussionUrl) || '',
                     url: discussionUrl,
                 },
             });
         }
 
         return this.jsonResponse({ success: true });
+    }
+
+    /**
+     * Validates a discussion URL and determines appropriate action
+     * Returns an object with:
+     * - response: If set, return this response immediately
+     * - createNew: If true, a new discussion should be created
+     * - roomId: If URL is valid, contains the extracted room ID
+     */
+    private validateDiscussionUrl(
+        url: string,
+        siteUrl: string,
+        rfdId: string,
+        overwriteInvalidUrl: boolean,
+        manager: DiscussionManager,
+        logger: any
+    ): { response?: IApiResponse; createNew: boolean; roomId?: string } {
+        const isValid = manager.isValidDiscussionUrl(url, siteUrl);
+        const roomId = manager.extractRoomIdFromUrl(url);
+
+        if (isValid && roomId) {
+            logger.info(`RFD ${rfdId} has valid discussion link: ${url}`);
+            return { createNew: false, roomId };
+        }
+
+        // URL is invalid (e.g., pointing to GitHub)
+        logger.warn(`RFD ${rfdId} has invalid discussion URL: ${url}`);
+
+        if (!overwriteInvalidUrl) {
+            logger.info(`Overwrite invalid URL setting is disabled for RFD ${rfdId}`);
+            return {
+                createNew: false,
+                response: this.errorResponse(
+                    HttpStatusCode.BAD_REQUEST,
+                    `Invalid discussion URL: ${url}. Enable 'Overwrite Invalid Discussion URL' setting to create a new discussion.`
+                )
+            };
+        }
+
+        logger.info(`Overwrite invalid URL setting is enabled, will create new discussion for RFD ${rfdId}`);
+        return { createNew: true };
     }
 
     private errorResponse(status: HttpStatusCode, message: string): IApiResponse {
