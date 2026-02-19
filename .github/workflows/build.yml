@@ -46,7 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rfd-discussions-app
-          path: "*.zip"
+          path: "dist/*.zip"
           retention-days: 30
 
   release:
@@ -85,12 +85,12 @@ jobs:
 
       - name: Get zip filename
         id: zipfile
-        run: echo "name=$(ls *.zip | head -1)" >> $GITHUB_OUTPUT
+        run: echo "name=$(ls dist/*.zip | head -1)" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ inputs.version }}
+          tag_name: ${{ inputs.version }}
           name: v${{ inputs.version }}
           body: |
             ## RFD Discussions App v${{ inputs.version }}
