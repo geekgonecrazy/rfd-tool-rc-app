@@ -85,8 +85,9 @@ export class DiscussionManager {
             `_Authors: ${rfd.authors.join(', ')}_`
         );
 
-        // Build discussion URL using the room ID (not slug)
-        const discussionUrl = `${siteUrl}/group/${discussionId}`;
+        // Build discussion URL as a universal/deep link for mobile and desktop app support
+        // Format: https://go.rocket.chat/room?host={host}&path=group/{roomId}
+        const discussionUrl = this.buildDeepLink(siteUrl, `group/${discussionId}`);
 
         return {
             id: discussionId,
@@ -331,5 +332,27 @@ export class DiscussionManager {
     private extractRoomIdFromUrl(url: string): string | null {
         const match = url.match(/\/group\/([^\/\?]+)/);
         return match ? match[1] : null;
+    }
+
+    /**
+     * Build a universal/deep link URL for Rocket.Chat
+     * Converts a site URL and path into a go.rocket.chat deep link
+     * that works with mobile apps and desktop clients.
+     * 
+     * Example: siteUrl="https://open.rocket.chat", path="group/abc123"
+     * Returns: "https://go.rocket.chat/room?host=open.rocket.chat&path=group/abc123"
+     */
+    private buildDeepLink(siteUrl: string, path: string): string {
+        // Extract host from siteUrl (e.g., "https://open.rocket.chat" -> "open.rocket.chat")
+        let host: string;
+        try {
+            const url = new URL(siteUrl);
+            host = url.host;
+        } catch {
+            // Fallback: strip protocol if URL parsing fails
+            host = siteUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        }
+        
+        return `https://go.rocket.chat/room?host=${encodeURIComponent(host)}&path=${encodeURIComponent(path)}`;
     }
 }
