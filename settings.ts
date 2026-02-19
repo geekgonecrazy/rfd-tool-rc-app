@@ -4,6 +4,7 @@ export enum SettingId {
     ParentChannel = 'parent_channel',
     WebhookSecret = 'webhook_secret',
     SiteUrl = 'site_url',
+    Prefix = 'prefix',
 }
 
 export const settings: ISetting[] = [
@@ -14,7 +15,7 @@ export const settings: ISetting[] = [
         required: true,
         public: false,
         i18nLabel: 'Parent Channel',
-        i18nDescription: 'The channel where ADR discussions will be created (e.g., "adrs" or "architecture")',
+        i18nDescription: 'The channel where discussions will be created (e.g., "adrs" or "architecture")',
     },
     {
         id: SettingId.WebhookSecret,
@@ -33,5 +34,14 @@ export const settings: ISetting[] = [
         public: false,
         i18nLabel: 'Site URL Override',
         i18nDescription: 'Override the Rocket.Chat site URL for discussion links (leave empty to use server default)',
+    },
+    {
+        id: SettingId.Prefix,
+        type: SettingType.STRING,
+        packageValue: 'RFD',
+        required: false,
+        public: false,
+        i18nLabel: 'Discussion Prefix',
+        i18nDescription: 'Prefix for discussion names (e.g., "RFD" or "ADR"). Default: RFD',
     },
 ];

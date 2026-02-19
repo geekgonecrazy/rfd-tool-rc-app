@@ -22,6 +22,7 @@ export class DiscussionManager {
         rfd: RFD,
         rfdLink: string,
         siteUrl: string,
+        prefix: string = 'RFD',
     ): Promise<{ id: string; url: string } | null> {
         // Get the parent room
         const parentRoom = await this.read.getRoomReader().getByName(parentChannel);
@@ -36,14 +37,14 @@ export class DiscussionManager {
         }
 
         // Build discussion name and description
-        const discussionName = `ADR-${rfd.id}: ${rfd.title}`;
+        const discussionName = `${prefix}-${rfd.id}: ${rfd.title}`;
         const description = this.buildDescription(rfd, rfdLink);
 
         // Create the discussion
         const discussionBuilder = this.modify.getCreator().startDiscussion()
             .setParentRoom(parentRoom)
             .setDisplayName(discussionName)
-            .setSlugifiedName(this.slugify(`adr-${rfd.id}-${rfd.title}`))
+            .setSlugifiedName(this.slugify(`${prefix.toLowerCase()}-${rfd.id}-${rfd.title}`))
             .setCreator(appUser);
 
         const discussionId = await this.modify.getCreator().finish(discussionBuilder);
@@ -69,10 +70,10 @@ export class DiscussionManager {
         await this.postMessage(
             discussion,
             appUser,
-            `🎉 **New ADR Created**\n\n` +
+            `🎉 **New ${prefix} Created**\n\n` +
             `**${rfd.title}**\n\n` +
             `${STATE_DESCRIPTIONS[rfd.state]}\n\n` +
-            `🔗 [Read the full ADR](${rfdLink})\n\n` +
+            `🔗 [Read the full ${prefix}](${rfdLink})\n\n` +
             `_Authors: ${rfd.authors.join(', ')}_`
         );
 

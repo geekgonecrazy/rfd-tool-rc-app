@@ -16,6 +16,7 @@ import { SettingId } from '../settings';
 import { WebhookPayload, WebhookResponse } from '../lib/types';
 import { verifySignature } from '../lib/crypto';
 import { DiscussionManager } from '../lib/DiscussionManager';
+import { DiscussionStore } from '../lib/DiscussionStore';
 
 export class WebhookEndpoint extends ApiEndpoint {
     public path = 'webhook';
@@ -39,6 +40,7 @@ export class WebhookEndpoint extends ApiEndpoint {
             const webhookSecret = await read.getEnvironmentReader().getSettings().getValueById(SettingId.WebhookSecret);
             const parentChannel = await read.getEnvironmentReader().getSettings().getValueById(SettingId.ParentChannel);
             const siteUrlOverride = await read.getEnvironmentReader().getSettings().getValueById(SettingId.SiteUrl);
+            const prefix = await read.getEnvironmentReader().getSettings().getValueById(SettingId.Prefix) || 'RFD';
 
             if (!webhookSecret) {
                 logger.error('Webhook secret not configured');
@@ -87,10 +89,10 @@ export class WebhookEndpoint extends ApiEndpoint {
             // Handle event
             switch (payload.event) {
                 case 'rfd.created':
-                    return await this.handleCreated(payload, parentChannel, siteUrl, discussionManager, logger);
+                    return await this.handleCreated(payload, parentChannel, siteUrl, prefix, discussionManager, read.getPersistenceReader(), persis, logger);
 
                 case 'rfd.updated':
-                    return await this.handleUpdated(payload, discussionManager, logger);
+                    return await this.handleUpdated(payload, read.getPersistenceReader(), discussionManager, logger);
 
                 default:
                     logger.warn(`Unknown event type: ${payload.event}`);
@@ -109,23 +111,59 @@ export class WebhookEndpoint extends ApiEndpoint {
         payload: WebhookPayload,
         parentChannel: string,
         siteUrl: string,
+        prefix: string,
         manager: DiscussionManager,
+        persistenceRead: any,
+        persistence: IPersistence,
         logger: any,
     ): Promise<IApiResponse> {
-        logger.info(`Creating discussion for RFD ${payload.rfd.id}: ${payload.rfd.title}`);
+        const rfdId = payload.rfd.id;
+
+        // First check if the incoming RFD already has a discussion link
+        if (payload.rfd.discussion) {
+            logger.info(`RFD ${rfdId} already has discussion link: ${payload.rfd.discussion}`);
+            return this.jsonResponse({
+                success: true,
+                message: 'Discussion already exists',
+                discussion: {
+                    id: this.extractRoomIdFromUrl(payload.rfd.discussion) || '',
+                    url: payload.rfd.discussion,
+                },
+            });
+        }
+
+        // Check persistence for existing discussion
+        const existingDiscussion = await DiscussionStore.getDiscussion(persistenceRead, rfdId);
+        if (existingDiscussion) {
+            logger.info(`Found existing discussion for RFD ${rfdId} in persistence: ${existingDiscussion.roomUrl}`);
+            return this.jsonResponse({
+                success: true,
+                message: 'Discussion already exists (from persistence)',
+                discussion: {
+                    id: existingDiscussion.roomId,
+                    url: existingDiscussion.roomUrl,
+                },
+            });
+        }
+
+        // Create new discussion
+        logger.info(`Creating discussion for RFD ${rfdId}: ${payload.rfd.title}`);
 
         const discussion = await manager.createDiscussion(
             parentChannel,
             payload.rfd,
             payload.link,
             siteUrl,
+            prefix,
         );
 
         if (!discussion) {
             return this.errorResponse(HttpStatusCode.INTERNAL_SERVER_ERROR, 'Failed to create discussion');
         }
 
-        logger.info(`Discussion created: ${discussion.url}`);
+        // Store in persistence
+        await DiscussionStore.storeDiscussion(persistence, rfdId, discussion.id, discussion.url);
+        logger.info(`Discussion created and stored: ${discussion.url}`);
 
         const response: WebhookResponse = {
             success: true,
@@ -138,16 +176,37 @@ export class WebhookEndpoint extends ApiEndpoint {
         return this.jsonResponse(response);
     }
 
+    private extractRoomIdFromUrl(url: string): string | null {
+        const match = url.match(/\/group\/([^\/\?]+)/);
+        return match ? match[1] : null;
+    }
+
     private async handleUpdated(
         payload: WebhookPayload,
+        persistenceRead: any,
         manager: DiscussionManager,
         logger: any,
     ): Promise<IApiResponse> {
-        // Check if we have a discussion URL to update
-        if (!payload.rfd.discussion) {
-            logger.info(`RFD ${payload.rfd.id} has no discussion URL, skipping update`);
+        const rfdId = payload.rfd.id;
+
+        // Check if we have a discussion URL to update - first from payload, then from persistence
+        let discussionUrl = payload.rfd.discussion;
+        
+        if (!discussionUrl) {
+            const existingDiscussion = await DiscussionStore.getDiscussion(persistenceRead, rfdId);
+            if (existingDiscussion) {
+                discussionUrl = existingDiscussion.roomUrl;
+                logger.info(`Found discussion URL from persistence for RFD ${rfdId}: ${discussionUrl}`);
+            }
+        }
+
+        if (!discussionUrl) {
+            logger.info(`RFD ${rfdId} has no discussion URL, skipping update`);
             return this.jsonResponse({ success: true, message: 'No discussion to update' });
         }
+
+        // Update the payload's discussion URL for the manager
+        payload.rfd.discussion = discussionUrl;
 
         if (!payload.changes) {
             logger.info(`No changes provided for RFD ${payload.rfd.id}`);
