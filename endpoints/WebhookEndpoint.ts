@@ -124,35 +124,31 @@ export class WebhookEndpoint extends ApiEndpoint {
         // First check if the incoming RFD already has a discussion link
         if (payload.rfd.discussion) {
             // Validate the discussion URL
-            const isValid = manager.isValidDiscussionUrl(payload.rfd.discussion, siteUrl);
-            const roomId = manager.extractRoomIdFromUrl(payload.rfd.discussion);
-
-            if (isValid && roomId) {
-                logger.info(`RFD ${rfdId} already has valid discussion link: ${payload.rfd.discussion}`);
+            const validationResult = this.validateDiscussionUrl(
+                payload.rfd.discussion,
+                siteUrl,
+                rfdId,
+                overwriteInvalidUrl,
+                manager,
+                logger
+            );
+            
+            if (validationResult.response) {
+                return validationResult.response;
+            }
+            
+            // If createNew is false and no response, the URL was valid - return success
+            if (!validationResult.createNew) {
                 return this.jsonResponse({
                     success: true,
                     message: 'Discussion already exists',
                     discussion: {
-                        id: roomId,
+                        id: validationResult.roomId!,
                         url: payload.rfd.discussion,
                     },
                 });
             }
-
-            // URL is invalid (e.g., pointing to GitHub)
-            if (!isValid || !roomId) {
-                logger.warn(`RFD ${rfdId} has invalid discussion URL: ${payload.rfd.discussion}`);
-                
-                if (!overwriteInvalidUrl) {
-                    logger.info(`Overwrite invalid URL setting is disabled, skipping creation for RFD ${rfdId}`);
-                    return this.errorResponse(
-                        HttpStatusCode.BAD_REQUEST, 
-                        `Invalid discussion URL: ${payload.rfd.discussion}. Enable 'Overwrite Invalid Discussion URL' setting to create a new discussion.`
-                    );
-                }
-
-                logger.info(`Overwrite invalid URL setting is enabled, creating new discussion for RFD ${rfdId}`);
-            }
+            // If createNew is true, continue to create a new discussion
         }
 
         // Check persistence for existing discussion
@@ -219,25 +215,25 @@ export class WebhookEndpoint extends ApiEndpoint {
         let shouldCreateNew = false;
         
         if (discussionUrl) {
-            // Validate the existing URL
-            const isValid = manager.isValidDiscussionUrl(discussionUrl, siteUrl);
-            const roomId = manager.extractRoomIdFromUrl(discussionUrl);
+            // Validate the existing URL using shared validation method
+            const validationResult = this.validateDiscussionUrl(
+                discussionUrl,
+                siteUrl,
+                rfdId,
+                overwriteInvalidUrl,
+                manager,
+                logger
+            );
 
-            if (!isValid || !roomId) {
-                logger.warn(`RFD ${rfdId} has invalid discussion URL: ${discussionUrl}`);
-                
-                if (!overwriteInvalidUrl) {
-                    return this.errorResponse(
-                        HttpStatusCode.BAD_REQUEST, 
-                        `Invalid discussion URL: ${discussionUrl}. Enable 'Overwrite Invalid Discussion URL' setting to create a new discussion.`
-                    );
-                }
+            if (validationResult.response) {
+                return validationResult.response;
+            }
 
-                logger.info(`Overwrite invalid URL setting is enabled, will create new discussion for RFD ${rfdId}`);
+            if (validationResult.createNew) {
                 discussionUrl = undefined;
                 shouldCreateNew = true;
             } else {
-                discussionId = roomId;
+                discussionId = validationResult.roomId;
             }
         }
         
@@ -309,6 +305,47 @@ export class WebhookEndpoint extends ApiEndpoint {
         }
 
         return this.jsonResponse({ success: true });
+    }
+
+    /**
+     * Validates a discussion URL and determines appropriate action
+     * Returns an object with:
+     * - response: If set, return this response immediately
+     * - createNew: If true, a new discussion should be created
+     * - roomId: If URL is valid, contains the extracted room ID
+     */
+    private validateDiscussionUrl(
+        url: string,
+        siteUrl: string,
+        rfdId: string,
+        overwriteInvalidUrl: boolean,
+        manager: DiscussionManager,
+        logger: any
+    ): { response?: IApiResponse; createNew: boolean; roomId?: string } {
+        const isValid = manager.isValidDiscussionUrl(url, siteUrl);
+        const roomId = manager.extractRoomIdFromUrl(url);
+
+        if (isValid && roomId) {
+            logger.info(`RFD ${rfdId} has valid discussion link: ${url}`);
+            return { createNew: false, roomId };
+        }
+
+        // URL is invalid (e.g., pointing to GitHub)
+        logger.warn(`RFD ${rfdId} has invalid discussion URL: ${url}`);
+
+        if (!overwriteInvalidUrl) {
+            logger.info(`Overwrite invalid URL setting is disabled for RFD ${rfdId}`);
+            return {
+                createNew: false,
+                response: this.errorResponse(
+                    HttpStatusCode.BAD_REQUEST,
+                    `Invalid discussion URL: ${url}. Enable 'Overwrite Invalid Discussion URL' setting to create a new discussion.`
+                )
+            };
+        }
+
+        logger.info(`Overwrite invalid URL setting is enabled, will create new discussion for RFD ${rfdId}`);
+        return { createNew: true };
     }
 
     private errorResponse(status: HttpStatusCode, message: string): IApiResponse {
