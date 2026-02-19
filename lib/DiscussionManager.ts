@@ -349,8 +349,10 @@ export class DiscussionManager {
             const url = new URL(siteUrl);
             host = url.host;
         } catch {
-            // Fallback: strip protocol if URL parsing fails
-            host = siteUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            // Fallback: extract host using regex if URL parsing fails
+            // This handles formats like "https://host.com:3000/path?query" -> "host.com:3000"
+            const match = siteUrl.match(/^(?:https?:\/\/)?([^\/\?\#]+)/);
+            host = match ? match[1] : siteUrl;
         }
         
         return `https://go.rocket.chat/room?host=${encodeURIComponent(host)}&path=${encodeURIComponent(path)}`;
