@@ -10,7 +10,10 @@
   },
   "devDependencies": {
     "@rocket.chat/apps-engine": "^1.41.0",
+    "@types/node": "^16.18.126",
     "typescript": "~5.3.3"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@rocket.chat/ui-kit": "^0.39.0"
+  }
 }

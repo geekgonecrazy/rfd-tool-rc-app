@@ -1,7 +1,7 @@
 {
-    "id": "rfd-discussions",
+    "id": "83729163-9c28-4331-b9a2-55594f32b3aa",
     "version": "1.0.0",
-    "requiredApiVersion": "^1.4.0",
+    "requiredApiVersion": "^1.41.0",
     "iconFile": "icon.png",
     "author": {
         "name": "Aaron Ogle",
@@ -11,5 +11,6 @@
     "name": "RFD Discussions",
     "nameSlug": "rfd-discussions",
     "classFile": "RfdDiscussionsApp.ts",
-    "description": "Automatically creates and manages Rocket.Chat discussions for RFDs/ADRs from rfd-tool webhooks"
+    "description": "Automatically creates and manages Rocket.Chat discussions for RFDs/ADRs from rfd-tool webhooks",
+    "implements": []
 }
