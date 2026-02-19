@@ -6,3 +6,7 @@ dist/
 !*.config.js
 *.zip
 .DS_Store
+
+# Deploy keys
+source_deploy_key
+source_deploy_key.pub
