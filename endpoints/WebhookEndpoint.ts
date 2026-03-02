@@ -302,7 +302,12 @@ export class WebhookEndpoint extends ApiEndpoint {
             );
         } catch (error) {
             // Check if the error is because the discussion room was deleted
-            if (error instanceof Error && error.message.includes('not found')) {
+            // The error from DiscussionManager.updateDiscussion is: "Discussion room with ID '...' not found"
+            const isRoomNotFound = error instanceof Error && 
+                error.message.includes('Discussion room') && 
+                error.message.includes('not found');
+            
+            if (isRoomNotFound) {
                 logger.warn(`Discussion room for RFD ${rfdId} was deleted, creating a new one`);
                 
                 // Create a new discussion since the old one was deleted
