@@ -293,12 +293,53 @@ export class WebhookEndpoint extends ApiEndpoint {
 
         logger.info(`Updating discussion for RFD ${payload.rfd.id}`);
 
-        await manager.updateDiscussion(
-            payload.rfd.discussion,
-            payload.rfd,
-            payload.link,
-            payload.changes,
-        );
+        try {
+            await manager.updateDiscussion(
+                payload.rfd.discussion,
+                payload.rfd,
+                payload.link,
+                payload.changes,
+            );
+        } catch (error) {
+            // Check if the error is because the discussion room was deleted
+            // The error from DiscussionManager.updateDiscussion is: "Discussion room with ID '...' not found"
+            const isRoomNotFound = error instanceof Error && 
+                error.message.includes('Discussion room') && 
+                error.message.includes('not found');
+            
+            if (isRoomNotFound) {
+                logger.warn(`Discussion room for RFD ${rfdId} was deleted, creating a new one`);
+                
+                // Create a new discussion since the old one was deleted
+                const discussion = await manager.createDiscussion(
+                    parentChannel,
+                    payload.rfd,
+                    payload.link,
+                    siteUrl,
+                    prefix,
+                    useDeepLinks,
+                );
+
+                if (!discussion) {
+                    return this.errorResponse(HttpStatusCode.INTERNAL_SERVER_ERROR, 'Failed to create discussion');
+                }
+
+                // Update persistence with the new discussion
+                await DiscussionStore.storeDiscussion(persistence, rfdId, discussion.id, discussion.url);
+                logger.info(`New discussion created after deleted one: ${discussion.url}`);
+
+                return this.jsonResponse({
+                    success: true,
+                    discussion: {
+                        id: discussion.id,
+                        url: discussion.url,
+                    },
+                });
+            }
+            
+            // Re-throw any other error
+            throw error;
+        }
 
         // If discussion was found from persistence (not in payload), return it so rfd-tool can commit it
         if (discussionFromPersistence && discussionUrl) {
