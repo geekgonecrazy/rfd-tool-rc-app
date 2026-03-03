@@ -13,16 +13,10 @@ npm install
 ### Verify the build passes
 
 ```bash
-npm ci && npx tsc
+npm ci && npx tsc && rc-apps package
 ```
 
-Both commands must succeed without errors before committing. If `package.json` dependencies are changed, run `npm install` to regenerate `package-lock.json`, then verify `npm ci` still succeeds.
-
-### Package the app
-
-```bash
-rc-apps package
-```
+Both `npm ci` and `npx tsc` must succeed without errors before committing. The `rc-apps package` step must also pass to confirm the app bundles correctly. If `package.json` dependencies are changed, run `npm install` to regenerate `package-lock.json`, then verify `npm ci` still succeeds.
 
 ## Key Files
 
